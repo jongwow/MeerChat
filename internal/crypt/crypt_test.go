@@ -161,3 +161,26 @@ func BenchmarkSeal(b *testing.B) {
 		}
 	}
 }
+
+// TestKnownAnswers pins the derivations in docs/PROTOCOL.md. If this fails,
+// clients built from different versions will no longer understand each other.
+func TestKnownAnswers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Argon2id with default parameters")
+	}
+	if got := RouteID("lobby"); got != "36779ba0162c12ce43c240b31bbd9cd2" {
+		t.Errorf("RouteID(lobby) = %s", got)
+	}
+	for pw, want := range map[string]string{
+		"correct horse battery staple": "4E73-90A0",
+		"guess":                        "AE95-29C7",
+	} {
+		k, err := DeriveKey("lobby", pw, DefaultParams)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if k.Fingerprint() != want {
+			t.Errorf("fingerprint(lobby, %q) = %s, want %s", pw, k.Fingerprint(), want)
+		}
+	}
+}

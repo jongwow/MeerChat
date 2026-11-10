@@ -1,0 +1,105 @@
+# Three people, one room. alice and bob share the password; mallory doesn't.
+
+exec meer serve --addr $RELAY --log-level warn &relay&
+waitport $RELAY
+
+env MEER_SOCKET=$SOCKDIR/alice.sock
+exec meer daemon --log-level warn &alice&
+waitsock $SOCKDIR/alice.sock
+exec meer nick alice
+stdin right.txt
+exec meer join --password-stdin meer://$RELAY/lobby
+stdout '^joined meer://127\.0\.0\.1:\d+/lobby$'
+stdout 'key fingerprint: 4E73-90A0'
+
+env MEER_SOCKET=$SOCKDIR/bob.sock
+exec meer daemon --log-level warn &bob&
+waitsock $SOCKDIR/bob.sock
+exec meer nick bob
+stdin right.txt
+exec meer join --password-stdin meer://$RELAY/lobby
+stdout 'key fingerprint: 4E73-90A0'
+
+env MEER_SOCKET=$SOCKDIR/mallory.sock
+exec meer daemon --log-level warn &mallory&
+waitsock $SOCKDIR/mallory.sock
+exec meer nick mallory
+stdin wrong.txt
+exec meer join --password-stdin meer://$RELAY/lobby
+stdout 'key fingerprint: AE95-29C7'
+
+# alice talks: a message, piped lines, and an action.
+env MEER_SOCKET=$SOCKDIR/alice.sock
+exec meer send the plans are in the shoebox
+stdin lines.txt
+exec meer send -r lobby
+exec meer send --me waves
+
+# bob reads along.
+env MEER_SOCKET=$SOCKDIR/bob.sock
+eventually '\* alice waves' meer tail --no-follow -n 50
+stdout '#lobby → alice joined'
+stdout '#lobby <alice> the plans are in the shoebox'
+stdout '#lobby <alice> first line'
+stdout '#lobby <alice> second line'
+! stdout 'third'
+
+# mallory only hears meerkats, and is heard as one.
+env MEER_SOCKET=$SOCKDIR/mallory.sock
+exec meer send hello? anyone?
+eventually '<meerkat-[0-9a-f]{4}> ' meer tail --no-follow -n 50
+! stdout 'shoebox'
+! stdout '<alice>'
+stdout '<mallory> hello\? anyone\?'
+
+env MEER_SOCKET=$SOCKDIR/bob.sock
+eventually '<meerkat-[0-9a-f]{4}> ' meer tail --no-follow -n 50 -r lobby
+! stdout 'anyone'
+
+# Machine-readable output.
+exec meer tail --no-follow --json -n 50
+stdout '"kind":"message","time":"[^"]+","seq":\d+,"peer":"[0-9a-f]{8}","nick":"alice","text":"the plans are in the shoebox"'
+exec meer rooms
+stdout '^lobby\s+online\s+3\s+4E73-90A0\s+meer://'
+exec meer rooms --json
+stdout '"name":"lobby"'
+
+# Nick changes are announced.
+exec meer nick robert
+exec meer nick
+stdout '^robert$'
+env MEER_SOCKET=$SOCKDIR/alice.sock
+eventually '~ bob is now robert' meer tail --no-follow -n 50
+
+# Leaving.
+exec meer leave lobby
+exec meer rooms
+stdout 'not in any rooms'
+env MEER_SOCKET=$SOCKDIR/bob.sock
+eventually '← alice left' meer tail --no-follow -n 50
+
+# Shut everything down.
+exec meer daemon status
+stdout 'running as pid \d+, 1 room'
+exec meer daemon stop
+wait bob
+env MEER_SOCKET=$SOCKDIR/alice.sock
+exec meer daemon stop
+wait alice
+env MEER_SOCKET=$SOCKDIR/mallory.sock
+exec meer daemon stop
+wait mallory
+exec meer daemon status
+stdout 'daemon is not running'
+# The relay shuts down cleanly on interrupt (Windows has no SIGINT to send).
+kill -INT relay
+[!windows] wait relay
+
+-- right.txt --
+correct horse battery staple
+-- wrong.txt --
+guess
+-- lines.txt --
+first line
+
+second line
