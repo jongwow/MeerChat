@@ -116,9 +116,11 @@ exec meer daemon stop
 wait mallory
 exec meer daemon status
 stdout 'daemon is not running'
-# The relay shuts down cleanly on interrupt (Windows has no SIGINT to send).
-kill -INT relay
+# The relay shuts down cleanly on interrupt. Windows can't send SIGINT to
+# another process, so there it just gets killed.
+[!windows] kill -INT relay
 [!windows] wait relay
+[windows] kill relay
 
 -- right.txt --
 correct horse battery staple
