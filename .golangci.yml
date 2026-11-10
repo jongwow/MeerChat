@@ -1,0 +1,35 @@
+version: "2"
+linters:
+  enable:
+    - errorlint
+    - gosec
+    - misspell
+    - nilerr
+    - revive
+    - unconvert
+    - unparam
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - os.Remove
+        - os.RemoveAll
+    gosec:
+      excludes:
+        - G104 # unchecked errors on best-effort closes are intentional
+        - G115 # integer conversions are bounds-checked where it matters
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+  exclusions:
+    rules:
+      # Closing is best effort everywhere it is deferred.
+      - linters: [errcheck]
+        text: "Error return value of `.*\\.(Close|CloseNow)` is not checked"
+      - path: _test\.go
+        linters: [gosec, unparam]
+formatters:
+  enable: [gofmt, goimports]

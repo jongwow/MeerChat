@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+      - run: go vet ./...
+      - name: Test (race)
+        if: runner.os != 'Windows'
+        run: go test -race -count=1 ./...
+      - name: Test
+        if: runner.os == 'Windows'
+        run: go test -count=1 ./...
+      - name: Fuzz (short)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          go test -run '^$' -fuzz FuzzOpen -fuzztime 30s ./internal/crypt
+          go test -run '^$' -fuzz FuzzDecodeClientFrame -fuzztime 30s ./internal/protocol
+
+  cross-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+      - run: |
+          for target in linux/arm64 darwin/arm64 windows/amd64 freebsd/amd64; do
+            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/meer
+          done
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

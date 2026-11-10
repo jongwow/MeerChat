@@ -1,0 +1,41 @@
+# Helpful failures, without a daemon or relay.
+env MEER_SOCKET=$SOCKDIR/none.sock
+
+exec meer version
+stdout '^meer '
+exec meer --help
+stdout 'meerkats'
+
+! exec meer send hello
+stderr 'not connected to any rooms'
+! exec meer tail
+stderr 'not connected to any rooms'
+! exec meer
+stderr 'needs a terminal'
+
+! exec meer join http://example.com/lobby
+stderr 'unknown scheme "http"'
+! exec meer join meer://example.com
+stderr 'no room name'
+! exec meer join meer://example.com/a/b
+stderr 'must not contain'
+! exec meer join meer://example.com/lobby
+stderr 'no password'
+
+! exec meer nick 'has space'
+stderr 'spaces'
+
+# With a daemon but nothing joined.
+exec meer daemon --log-level warn &d&
+waitsock $SOCKDIR/none.sock
+exec meer rooms
+stdout 'not in any rooms'
+! exec meer send hello
+stderr 'not in any room'
+env MEER_PASSWORD=pw
+! exec meer join meer://127.0.0.1:1/lobby
+stderr 'connect 127\.0\.0\.1:1'
+exec meer rooms
+stdout 'not in any rooms'
+exec meer daemon stop
+wait d

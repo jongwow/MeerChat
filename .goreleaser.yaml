@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/meer
+    binary: meer
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows, freebsd]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/jongwow/meerchat/internal/version.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE, README.md, docs/PROTOCOL.md, docs/THREAT_MODEL.md]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^ci:"]
+
+# Homebrew: create github.com/jongwow/homebrew-tap, add a HOMEBREW_TAP_TOKEN
+# secret, and uncomment.
+# homebrew_casks:
+#   - repository:
+#       owner: jongwow
+#       name: homebrew-tap
+#       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+#     homepage: https://github.com/jongwow/meerchat
+#     description: End-to-end encrypted terminal chat. Wrong password? Meerkats.
