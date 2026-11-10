@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -222,7 +223,44 @@ func TestRateLimit(t *testing.T) {
 	}
 }
 
+func TestFanoutKicksFullQueues(t *testing.T) {
+	kicked := make(chan string, 2)
+	mk := func(id string, buf int) *peer {
+		return &peer{id: id, out: make(chan []byte, buf), close: func(_ websocket.StatusCode, reason string) {
+			kicked <- id + ": " + reason
+		}}
+	}
+	fast, slow := mk("fast", 10), mk("slow", 1)
+	s := New(Config{})
+	defer s.Close()
+	rm := &room{peers: map[*peer]struct{}{fast: {}, slow: {}}}
+	rm.mu.Lock()
+	s.fanout(rm, nil, []byte("1"))
+	s.fanout(rm, nil, []byte("2")) // slow's queue is full now
+	s.fanout(rm, nil, []byte("3")) // kicked once, not twice
+	rm.mu.Unlock()
+	select {
+	case k := <-kicked:
+		if k != "slow: too slow" {
+			t.Fatalf("kicked %q", k)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("slow peer not kicked")
+	}
+	select {
+	case k := <-kicked:
+		t.Fatalf("unexpected second kick %q", k)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if len(fast.out) != 3 {
+		t.Fatalf("fast peer got %d frames", len(fast.out))
+	}
+}
+
 func TestSlowConsumerIsDropped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows auto-tunes socket buffers far beyond what this test can fill; TestFanoutKicksFullQueues covers the logic")
+	}
 	_, url := newTestServer(t, Config{SendBuffer: 4, Replay: 1, Rate: 1e6, Burst: 1e6, Store: store.NewMemory(0)})
 	fast := dial(t, url, route, 0)
 	dial(t, url, route, 0) // never reads

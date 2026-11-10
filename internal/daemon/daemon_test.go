@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -207,6 +208,9 @@ func TestShutdown(t *testing.T) {
 }
 
 func TestSocketPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no Unix permissions on Windows")
+	}
 	_, sock := startDaemon(t, "alice")
 	fi, err := os.Stat(sock)
 	if err != nil {

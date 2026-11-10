@@ -11,6 +11,7 @@ permissions:
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -18,7 +19,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.26.x"
+          check-latest: true
       - run: go vet ./...
       - name: Test (race)
         if: runner.os != 'Windows'
@@ -38,7 +40,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.26.x"
+          check-latest: true
       - run: |
           for target in linux/arm64 darwin/arm64 windows/amd64 freebsd/amd64; do
             GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/meer
@@ -50,7 +53,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.26.x"
+          check-latest: true
       - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
@@ -61,5 +65,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.26.x"
+          check-latest: true
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

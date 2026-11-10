@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"syscall"
 	"time"
@@ -41,7 +42,8 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "unix", c.path)
 	if err != nil {
-		if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED) {
+		if _, serr := os.Stat(c.path); errors.Is(serr, os.ErrNotExist) ||
+			errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED) || isRefused(err) {
 			return nil, ErrNoDaemon
 		}
 		return nil, err

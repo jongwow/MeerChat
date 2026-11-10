@@ -113,15 +113,17 @@ type room struct {
 type peer struct {
 	id   string
 	out  chan []byte
-	conn *websocket.Conn
 	once sync.Once
+	// close ends the connection with a status code. It is a field so the
+	// fan-out logic can be tested without real sockets.
+	close func(websocket.StatusCode, string)
 }
 
 // kick closes the peer's connection with a status code. It does not block:
 // a close handshake can take seconds and kick is called with locks held.
 func (p *peer) kick(code websocket.StatusCode, reason string) {
 	p.once.Do(func() {
-		go func() { _ = p.conn.Close(code, reason) }()
+		go p.close(code, reason)
 	})
 }
 
@@ -265,7 +267,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	p := &peer{id: protocol.NewPeerID(), out: make(chan []byte, s.cfg.SendBuffer), conn: c}
+	p := &peer{
+		id:    protocol.NewPeerID(),
+		out:   make(chan []byte, s.cfg.SendBuffer),
+		close: func(code websocket.StatusCode, reason string) { _ = c.Close(code, reason) },
+	}
 
 	rm, err := s.join(ctx, route, p, since)
 	if err != nil {
