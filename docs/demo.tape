@@ -12,7 +12,7 @@ Set TypingSpeed 45ms
 
 Hide
 Type "export MEER_SOCKET=/tmp/meer-demo/you.sock; meer serve --addr 127.0.0.1:6337 >/dev/null 2>&1 &" Enter
-Type "mkdir -p -m 700 /tmp/meer-demo; as() { XDG_CONFIG_HOME=/tmp/meer-demo/cfg-$1 MEER_SOCKET=/tmp/meer-demo/$1.sock meer \"${@:2}\"; }; clear" Enter
+Type "mkdir -p -m 700 /tmp/meer-demo; as() { MEER_CONFIG_DIR=/tmp/meer-demo/cfg-$1 MEER_SOCKET=/tmp/meer-demo/$1.sock meer \"${@:2}\"; }; clear" Enter
 Show
 
 Type "# a room is a name and a password. the relay never sees either." Enter

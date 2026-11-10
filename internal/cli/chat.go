@@ -17,6 +17,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/jongwow/meerchat/internal/chat"
+	"github.com/jongwow/meerchat/internal/identity"
 	"github.com/jongwow/meerchat/internal/ipc"
 	"github.com/jongwow/meerchat/internal/protocol"
 	"github.com/jongwow/meerchat/internal/tui"
@@ -276,6 +277,10 @@ func formatEvent(e chat.Event, showRoom bool) string {
 	}
 	nick := chat.Sanitize(e.Nick, false)
 	text := chat.Sanitize(e.Text, false)
+	if e.Trust == identity.TrustChanged {
+		// Someone else is using this nickname. Make it impossible to miss.
+		nick = "⚠ " + nick + " (different key " + e.Key + ")"
+	}
 	switch e.Kind {
 	case chat.KindMessage:
 		return fmt.Sprintf("%s <%s> %s", prefix, nick, text)
@@ -354,6 +359,61 @@ func roomsCmd(g *globals) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	return cmd
+}
+
+func whoamiCmd(g *globals) *cobra.Command {
+	return &cobra.Command{
+		Use:   "whoami",
+		Short: "Show your nickname and device key fingerprint",
+		Long: `Every message you send is signed with a key that lives on this device
+(in your config directory). Others see its fingerprint and get warned if
+someone else later uses your nickname with a different key.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			c, err := g.connect(cmd.Context(), false)
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			n, err := c.Nick(cmd.Context())
+			if err != nil {
+				return err
+			}
+			key, err := c.Identity(cmd.Context())
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s  key %s\n", n, key)
+			return nil
+		},
+	}
+}
+
+func trustCmd(g *globals) *cobra.Command {
+	var room string
+	cmd := &cobra.Command{
+		Use:   "trust NICK",
+		Short: "Accept a nickname's new key after a key-change warning",
+		Long: `When someone speaks under a nickname that used a different key before,
+meer flags the message with ⚠. If you've confirmed out of band that they
+really did switch devices, accept the new key with this command.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := g.connect(cmd.Context(), false)
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			fp, err := c.Trust(cmd.Context(), room, args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "now trusting %s's key %s\n", args[0], fp)
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&room, "room", "r", "", "room name or address (default: most recently joined)")
 	return cmd
 }
 

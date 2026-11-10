@@ -26,7 +26,8 @@ If you join with the wrong password, nothing stops you. You just can't decrypt a
 - **One static binary.** Relay, client, background daemon, TUI and SSH demo are all `meer`. No CGO and no runtime dependencies.
 - **Shell-native.** Rooms live in a background daemon, like tmux sessions. Detach, reattach, and script it: `make && meer send "build passed"`, `meer tail --json | jq`.
 - **Robust where it matters.** Reconnects with jittered backoff and resumes from the last sequence number. An outbox gives at-least-once delivery on the wire and exactly-once on screen. A relay restart without a database doesn't lose messages that are still in flight.
-- **Boring crypto.** Argon2id, HKDF-SHA256 and XChaCha20-Poly1305, with padding to 128-byte buckets. There is no homemade cipher. Read [the protocol](docs/PROTOCOL.md) and [the threat model](docs/THREAT_MODEL.md), including what meer does *not* protect against.
+- **Impersonation is visible.** Every message is signed by a per-device Ed25519 key. If someone shows up under a familiar nickname with a different key, you get a ⚠ instead of a convincing fake.
+- **Boring crypto.** Argon2id, HKDF-SHA256, XChaCha20-Poly1305 and Ed25519, with padding to 128-byte buckets. There is no homemade cipher. Read [the protocol](docs/PROTOCOL.md) and [the threat model](docs/THREAT_MODEL.md), including what meer does *not* protect against.
 
 ## Try it
 
@@ -38,7 +39,7 @@ meer join meer://localhost/lobby               # prompts for the room password
 meer                                           # open the chat UI
 ```
 
-Open a second terminal with `MEER_SOCKET=/tmp/meer-bob/d.sock meer join meer://localhost/lobby`. Type the same password and you're chatting. Type a different one and you're a meerkat.
+Open a second terminal with `MEER_SOCKET=/tmp/meer-bob/d.sock MEER_CONFIG_DIR=/tmp/meer-bob meer join meer://localhost/lobby` (a separate socket and config directory make it a separate person). Type the same password and you're chatting. Type a different one and you're a meerkat.
 
 Without installing anything, if someone runs the SSH demo (`meer ssh`):
 
@@ -78,12 +79,13 @@ Everyone who typed the same password sees the same **key fingerprint** (e.g. `4F
 | `meer join ADDRESS` | Join `meer://host[:port]/room` (or `meers://` for TLS). The password comes from the TTY, `--password-stdin`, or `$MEER_PASSWORD`, never argv. |
 | `meer send [-r ROOM] [--me] TEXT…` | Send a message. With no text, it sends each line of stdin, rate-limited to stay under the relay's limits. |
 | `meer tail [-r ROOM] [-n N] [--json] [--no-follow]` | Print recent messages and follow. |
+| `meer whoami` · `meer trust NICK` | Show your device key; accept someone's new key after a ⚠ warning. |
 | `meer rooms [--json]` · `meer nick [NAME]` · `meer leave [ROOM]` | Housekeeping. |
 | `meer daemon [stop\|status\|log]` | The background daemon. Run `meer daemon` to keep it in the foreground. |
 | `meer serve` | Run a relay. See [Self-hosting](#self-hosting). |
 | `meer ssh` | Serve the UI over SSH as a try-it-now demo. |
 
-In the UI you can use `/join`, `/leave`, `/nick`, `/me`, `/fp`, `/clear`, `/quit` and `/help`. `tab` switches rooms, `pgup`/`pgdn` scroll, `↑` recalls history, and `//` sends a literal slash.
+In the UI you can use `/join`, `/leave`, `/nick`, `/me`, `/whois`, `/trust`, `/fp`, `/clear`, `/quit` and `/help`. `tab` switches rooms, `pgup`/`pgdn` scroll, `↑` recalls history, and `//` sends a literal slash.
 
 ### Scripting
 
@@ -117,7 +119,8 @@ meer serve --addr :6337 --db /var/lib/meer/relay.db --retention 168h
 meer protects message contents, nicknames and room names from the relay and the network. It does **not**:
 
 - protect weak passwords. Anyone holding a ciphertext can guess passwords offline at Argon2id speed (≈60 ms per guess here). Use a passphrase.
-- give forward secrecy or sender authentication. Anyone with the password can read past messages they captured and can claim any nickname.
+- give forward secrecy. Anyone who learns the password can read past messages they captured.
+- authenticate people you've never seen. Messages are signed per device, and a nickname that shows up with a different key than before gets a ⚠. The *first* key for a name wins, though (trust on first use).
 - hide metadata: IP addresses, timing, approximate sizes, and which connections share a route.
 
 This hasn't been audited. The full list, with reasoning, is in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md). Report problems as described in [SECURITY.md](SECURITY.md).
@@ -127,6 +130,7 @@ This hasn't been audited. The full list, with reasoning, is in [docs/THREAT_MODE
 ```
 cmd/meer            the one binary
 internal/crypt      key derivation, sealing, padding, route IDs
+internal/identity   device signing keys and trust-on-first-use bookkeeping
 internal/protocol   wire frames and encrypted payloads (docs/PROTOCOL.md)
 internal/server     the relay: rooms, fan-out, history replay, rate limits
 internal/store      history backends: memory ring buffer, SQLite

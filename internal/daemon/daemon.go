@@ -187,6 +187,18 @@ func (d *daemon) call(ctx context.Context, req ipc.Request) (any, error) {
 			d.onNick(p.Nick)
 		}
 		return nil, nil
+	case ipc.MethodIdentity:
+		return ipc.KeyResult{Key: d.m.Identity()}, nil
+	case ipc.MethodTrust:
+		var p ipc.TrustParams
+		if err := decode(&p); err != nil {
+			return nil, err
+		}
+		fp, err := d.m.Trust(p.Room, p.Nick)
+		if err != nil {
+			return nil, err
+		}
+		return ipc.KeyResult{Key: fp}, nil
 	case ipc.MethodShutdown:
 		d.log.Info("shutdown requested")
 		// Answer first, then stop.

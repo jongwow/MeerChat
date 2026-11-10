@@ -35,3 +35,9 @@ func (l Local) Subscribe(ctx context.Context, backlog int) (<-chan chat.Event, e
 	}()
 	return ch, nil
 }
+
+func (l Local) Identity(context.Context) (string, error) { return l.M.Identity(), nil }
+
+func (l Local) Trust(_ context.Context, room, nick string) (string, error) {
+	return l.M.Trust(room, nick)
+}

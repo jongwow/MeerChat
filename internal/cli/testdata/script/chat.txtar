@@ -3,7 +3,7 @@
 exec meer serve --addr $RELAY --log-level warn &relay&
 waitport $RELAY
 
-env MEER_SOCKET=$SOCKDIR/alice.sock
+env MEER_SOCKET=$SOCKDIR/alice.sock MEER_CONFIG_DIR=$WORK/alice
 exec meer daemon --log-level warn &alice&
 waitsock $SOCKDIR/alice.sock
 exec meer nick alice
@@ -12,7 +12,7 @@ exec meer join --password-stdin meer://$RELAY/lobby
 stdout '^joined meer://127\.0\.0\.1:\d+/lobby$'
 stdout 'key fingerprint: 4E73-90A0'
 
-env MEER_SOCKET=$SOCKDIR/bob.sock
+env MEER_SOCKET=$SOCKDIR/bob.sock MEER_CONFIG_DIR=$WORK/bob
 exec meer daemon --log-level warn &bob&
 waitsock $SOCKDIR/bob.sock
 exec meer nick bob
@@ -20,7 +20,7 @@ stdin right.txt
 exec meer join --password-stdin meer://$RELAY/lobby
 stdout 'key fingerprint: 4E73-90A0'
 
-env MEER_SOCKET=$SOCKDIR/mallory.sock
+env MEER_SOCKET=$SOCKDIR/mallory.sock MEER_CONFIG_DIR=$WORK/mallory
 exec meer daemon --log-level warn &mallory&
 waitsock $SOCKDIR/mallory.sock
 exec meer nick mallory
@@ -29,14 +29,14 @@ exec meer join --password-stdin meer://$RELAY/lobby
 stdout 'key fingerprint: AE95-29C7'
 
 # alice talks: a message, piped lines, and an action.
-env MEER_SOCKET=$SOCKDIR/alice.sock
+env MEER_SOCKET=$SOCKDIR/alice.sock MEER_CONFIG_DIR=$WORK/alice
 exec meer send the plans are in the shoebox
 stdin lines.txt
 exec meer send -r lobby
 exec meer send --me waves
 
 # bob reads along.
-env MEER_SOCKET=$SOCKDIR/bob.sock
+env MEER_SOCKET=$SOCKDIR/bob.sock MEER_CONFIG_DIR=$WORK/bob
 eventually '\* alice waves' meer tail --no-follow -n 50
 stdout '#lobby → alice joined'
 stdout '#lobby <alice> the plans are in the shoebox'
@@ -45,14 +45,14 @@ stdout '#lobby <alice> second line'
 ! stdout 'third'
 
 # mallory only hears meerkats, and is heard as one.
-env MEER_SOCKET=$SOCKDIR/mallory.sock
+env MEER_SOCKET=$SOCKDIR/mallory.sock MEER_CONFIG_DIR=$WORK/mallory
 exec meer send hello? anyone?
 eventually '<meerkat-[0-9a-f]{4}> ' meer tail --no-follow -n 50
 ! stdout 'shoebox'
 ! stdout '<alice>'
 stdout '<mallory> hello\? anyone\?'
 
-env MEER_SOCKET=$SOCKDIR/bob.sock
+env MEER_SOCKET=$SOCKDIR/bob.sock MEER_CONFIG_DIR=$WORK/bob
 eventually '<meerkat-[0-9a-f]{4}> ' meer tail --no-follow -n 50 -r lobby
 ! stdout 'anyone'
 
@@ -64,18 +64,43 @@ stdout '^lobby\s+online\s+3\s+4E73-90A0\s+meer://'
 exec meer rooms --json
 stdout '"name":"lobby"'
 
+# Every device signs its messages. eve knows the password and borrows
+# alice's name; bob has seen alice's key before, so eve gets flagged.
+exec meer whoami
+stdout '^bob  key [0-9a-f]{4}(-[0-9a-f]{4}){3}$'
+env MEER_SOCKET=$SOCKDIR/eve.sock MEER_CONFIG_DIR=$WORK/eve
+exec meer daemon --log-level warn &eve&
+waitsock $SOCKDIR/eve.sock
+exec meer nick alice
+stdin right.txt
+exec meer join --password-stdin meer://$RELAY/lobby
+exec meer send it is me, alice. send the shoebox
+env MEER_SOCKET=$SOCKDIR/bob.sock MEER_CONFIG_DIR=$WORK/bob
+eventually '⚠ alice \(different key [0-9a-f-]{19}\)> it is me' meer tail --no-follow -n 50
+exec meer tail --no-follow --json -n 50
+stdout '"nick":"alice","text":"it is me, alice. send the shoebox","key":"[0-9a-f-]{19}","trust":"changed"'
+stdout '"nick":"alice","text":"the plans are in the shoebox","key":"[0-9a-f-]{19}","trust":"(new|known)"'
+! exec meer trust nobody
+stderr 'haven.t seen nobody'
+exec meer trust alice
+stdout 'now trusting alice.s key'
+env MEER_SOCKET=$SOCKDIR/eve.sock MEER_CONFIG_DIR=$WORK/eve
+exec meer daemon stop
+wait eve
+env MEER_SOCKET=$SOCKDIR/bob.sock MEER_CONFIG_DIR=$WORK/bob
+
 # Nick changes are announced.
 exec meer nick robert
 exec meer nick
 stdout '^robert$'
-env MEER_SOCKET=$SOCKDIR/alice.sock
+env MEER_SOCKET=$SOCKDIR/alice.sock MEER_CONFIG_DIR=$WORK/alice
 eventually '~ bob is now robert' meer tail --no-follow -n 50
 
 # Leaving.
 exec meer leave lobby
 exec meer rooms
 stdout 'not in any rooms'
-env MEER_SOCKET=$SOCKDIR/bob.sock
+env MEER_SOCKET=$SOCKDIR/bob.sock MEER_CONFIG_DIR=$WORK/bob
 eventually '← alice left' meer tail --no-follow -n 50
 
 # Shut everything down.
@@ -83,10 +108,10 @@ exec meer daemon status
 stdout 'running as pid \d+, 1 room'
 exec meer daemon stop
 wait bob
-env MEER_SOCKET=$SOCKDIR/alice.sock
+env MEER_SOCKET=$SOCKDIR/alice.sock MEER_CONFIG_DIR=$WORK/alice
 exec meer daemon stop
 wait alice
-env MEER_SOCKET=$SOCKDIR/mallory.sock
+env MEER_SOCKET=$SOCKDIR/mallory.sock MEER_CONFIG_DIR=$WORK/mallory
 exec meer daemon stop
 wait mallory
 exec meer daemon status

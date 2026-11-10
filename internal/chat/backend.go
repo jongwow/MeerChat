@@ -17,4 +17,9 @@ type Backend interface {
 	// then live events. The channel closes when ctx is done or the
 	// subscriber fell behind and must resubscribe.
 	Subscribe(ctx context.Context, backlog int) (<-chan Event, error)
+	// Identity returns this device's key fingerprint.
+	Identity(ctx context.Context) (string, error)
+	// Trust accepts the key nick most recently used in room, after it was
+	// flagged as changed. It returns the newly trusted fingerprint.
+	Trust(ctx context.Context, room, nick string) (string, error)
 }

@@ -40,7 +40,7 @@ func TestScripts(t *testing.T) {
 			env.Defer(func() { os.RemoveAll(dir) })
 			env.Setenv("SOCKDIR", dir)
 			env.Setenv("RELAY", freePort(t))
-			env.Setenv("XDG_CONFIG_HOME", env.WorkDir+"/config")
+			env.Setenv("MEER_CONFIG_DIR", env.WorkDir+"/config")
 			env.Setenv("XDG_CACHE_HOME", env.WorkDir+"/cache")
 			return nil
 		},

@@ -51,7 +51,7 @@ aad    = "meerchat/v1/message" ‖ 0x00 ‖ route
 ct     = nonce ‖ XChaCha20-Poly1305-Seal( key, nonce, padded, aad )
 ```
 
-`p` is the JSON payload of §3, at most 8192 bytes. To open, a client verifies
+`p` is the JSON envelope of §3, at most 12288 bytes. To open, a client verifies
 the tag, checks that `len(padded)` is a multiple of 128 and that the length
 prefix fits, and returns `p`. Any failure, for any reason, is a meerkat (§4.3).
 
@@ -112,9 +112,29 @@ Every frame has `t`. Other fields depend on it:
 7. Peer IDs are per connection and carry no identity. Sequence numbers are per
    route and never decrease for the lifetime of the relay's store.
 
-## 3. Payload
+## 3. Envelope and payload
 
-The plaintext inside every ciphertext is a JSON object:
+### 3.1 Device keys and the envelope
+
+Every client device has an Ed25519 key pair (the reference client keeps it
+in its config directory). The plaintext inside every ciphertext is a signed
+envelope:
+
+| field | type | |
+|---|---|---|
+| `b` | base64 | the JSON payload of §3.2 |
+| `pk` | base64 | the sender's 32-byte Ed25519 public key |
+| `sig` | base64 | `Ed25519-Sign(sk, "meerchat/v1/signed-payload" ‖ 0x00 ‖ route ‖ 0x00 ‖ b)` |
+
+The room key proves the sender knows the password. The signature says which
+device sent it. Binding the route stops a signed payload from being replayed
+into another room. An envelope whose signature does not verify is noise
+(§4.3), exactly like one that does not decrypt.
+
+A device key's **fingerprint** is the first 8 bytes of `SHA-256(pk)` as
+lowercase hex in four dash-separated groups, e.g. `ad69-c219-e143-b9e6`.
+
+### 3.2 Payload
 
 | field | type | |
 |---|---|---|
@@ -127,6 +147,22 @@ The plaintext inside every ciphertext is a JSON object:
 A payload that decrypts but fails validation is treated exactly like one that
 does not decrypt. Receivers must not render `x` or `n` to a terminal without
 removing control and bidi-format characters.
+
+### 3.3 Trust on first use
+
+Receivers remember, per room, the first device key seen for each nickname,
+and label every message:
+
+| label | meaning |
+|---|---|
+| `self` | signed by this device |
+| `new` | first key ever seen for this nickname in this room; it is now remembered |
+| `known` | the remembered key |
+| `changed` | a different key than the remembered one; shown with a warning, and **not** remembered |
+
+A `nick` payload signed by the key remembered for the old nickname carries
+that key over to the new one. A user who has confirmed a key change out of
+band can accept the most recent key for a nickname (`/trust`, `meer trust`).
 
 ## 4. Client behaviour
 

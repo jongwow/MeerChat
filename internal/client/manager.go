@@ -11,6 +11,7 @@ import (
 
 	"github.com/jongwow/meerchat/internal/chat"
 	"github.com/jongwow/meerchat/internal/crypt"
+	"github.com/jongwow/meerchat/internal/identity"
 	"github.com/jongwow/meerchat/internal/protocol"
 )
 
@@ -24,6 +25,10 @@ type Options struct {
 	// AllowAddress, if set, vetoes joins. The SSH demo uses it to keep
 	// visitors on the local relay.
 	AllowAddress func(chat.Address) error
+	// Identity signs outgoing messages. Default: a fresh one per Manager.
+	Identity *identity.Identity
+	// Book remembers which key each nickname used. Default: in memory.
+	Book *identity.Book
 }
 
 // Manager is a set of joined rooms plus an event bus. The daemon and the SSH
@@ -78,6 +83,12 @@ func NewManager(opts Options) (*Manager, error) {
 	}
 	if opts.Scrollback == 0 {
 		opts.Scrollback = 500
+	}
+	if opts.Identity == nil {
+		opts.Identity = identity.Generate()
+	}
+	if opts.Book == nil {
+		opts.Book = identity.NewBook()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
@@ -191,7 +202,7 @@ func (m *Manager) Join(ctx context.Context, address, password string) (chat.Room
 	}
 	rctx, cancel := context.WithCancel(m.ctx)
 	j := &joined{cancel: cancel, done: make(chan struct{})}
-	j.conn = newRoomConn(addr, key, m.Nick, m.emit, m.log)
+	j.conn = newRoomConn(addr, key, m.opts.Identity, m.opts.Book, m.Nick, m.emit, m.log)
 	m.rooms[url] = j
 	m.order = append(m.order, url)
 	m.mu.Unlock()
@@ -290,6 +301,25 @@ func (m *Manager) Send(ctx context.Context, room, kind, text string) error {
 		return ErrNoRoom
 	}
 	return j.conn.say(ctx, pk, text)
+}
+
+// Identity returns this device's key fingerprint.
+func (m *Manager) Identity() string { return m.opts.Identity.Fingerprint() }
+
+// Trust accepts the key nick most recently used in room.
+func (m *Manager) Trust(room, nick string) (string, error) {
+	url, err := m.Resolve(room)
+	if err != nil {
+		return "", err
+	}
+	pub, err := m.opts.Book.Accept(url, nick)
+	if err != nil {
+		return "", err
+	}
+	fp := identity.Fingerprint(pub)
+	m.emit(chat.Event{Room: url, Kind: chat.KindSystem, Time: time.Now(),
+		Text: fmt.Sprintf("now trusting %s's key %s", nick, fp)})
+	return fp, nil
 }
 
 // Rooms lists joined rooms in join order.

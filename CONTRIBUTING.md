@@ -18,7 +18,7 @@ To run several clients on one machine, give each its own daemon socket and
 config directory:
 
 ```sh
-alias as='f(){ XDG_CONFIG_HOME=/tmp/meer-$1/cfg MEER_SOCKET=/tmp/meer-$1/d.sock go run ./cmd/meer "${@:2}"; }; f'
+alias as='f(){ MEER_CONFIG_DIR=/tmp/meer-$1/cfg MEER_SOCKET=/tmp/meer-$1/d.sock go run ./cmd/meer "${@:2}"; }; f'
 as bob join meer://localhost/lobby
 as bob
 ```

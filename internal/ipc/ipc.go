@@ -27,6 +27,8 @@ const (
 	MethodSetNick   = "set_nick"
 	MethodSubscribe = "subscribe"
 	MethodShutdown  = "shutdown"
+	MethodIdentity  = "identity"
+	MethodTrust     = "trust"
 )
 
 // Request is one call.
@@ -71,6 +73,13 @@ type (
 	}
 	SubscribeParams struct {
 		Backlog int `json:"backlog"`
+	}
+	TrustParams struct {
+		Room string `json:"room"`
+		Nick string `json:"nick"`
+	}
+	KeyResult struct {
+		Key string `json:"key"`
 	}
 )
 

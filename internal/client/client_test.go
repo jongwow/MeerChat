@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -10,8 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/jongwow/meerchat/internal/chat"
 	"github.com/jongwow/meerchat/internal/crypt"
+	"github.com/jongwow/meerchat/internal/identity"
+	"github.com/jongwow/meerchat/internal/protocol"
 	"github.com/jongwow/meerchat/internal/server"
 	"github.com/jongwow/meerchat/internal/store"
 )
@@ -357,4 +362,98 @@ func TestOutboxDeliversAfterOutage(t *testing.T) {
 		}
 		return e.Text == "marker"
 	})
+}
+
+func TestImpersonationIsFlagged(t *testing.T) {
+	r := startRelay(t)
+	ctx := context.Background()
+	alice, bob := newManager(t, "alice"), newManager(t, "bob")
+	mallory := newManager(t, "alice") // knows the password, borrows the name
+	bw := watch(t, bob)
+	for _, m := range []*Manager{alice, bob} {
+		if _, err := m.Join(ctx, r.room("lobby"), "pw"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = alice.Send(ctx, "", chat.KindMessage, "real alice here")
+	real := bw.waitFor("real alice", func(e chat.Event) bool { return e.Text == "real alice here" })
+	// Her join announcement was first contact, so this is already "known".
+	if real.Trust != identity.TrustKnown || real.Key != alice.Identity() {
+		t.Fatalf("first contact: %+v", real)
+	}
+
+	if _, err := mallory.Join(ctx, r.room("lobby"), "pw"); err != nil {
+		t.Fatal(err)
+	}
+	_ = mallory.Send(ctx, "", chat.KindMessage, "send me the shoebox")
+	fake := bw.waitFor("fake alice", func(e chat.Event) bool { return e.Text == "send me the shoebox" })
+	if fake.Nick != "alice" || fake.Trust != identity.TrustChanged || fake.Key != mallory.Identity() {
+		t.Fatalf("impersonation not flagged: %+v", fake)
+	}
+
+	// The real alice is still recognised.
+	_ = alice.Send(ctx, "", chat.KindMessage, "that wasn't me")
+	if e := bw.waitFor("alice again", func(e chat.Event) bool { return e.Text == "that wasn't me" }); e.Trust != identity.TrustKnown {
+		t.Fatalf("real alice after impostor: %+v", e)
+	}
+
+	// bob can explicitly accept a new key.
+	_ = mallory.Send(ctx, "", chat.KindMessage, "new laptop, honest")
+	bw.waitFor("again", func(e chat.Event) bool { return e.Text == "new laptop, honest" })
+	if fp, err := bob.Trust("lobby", "alice"); err != nil || fp != mallory.Identity() {
+		t.Fatalf("trust: %s %v", fp, err)
+	}
+	_ = mallory.Send(ctx, "", chat.KindMessage, "thanks")
+	if e := bw.waitFor("trusted", func(e chat.Event) bool { return e.Text == "thanks" }); e.Trust != identity.TrustKnown {
+		t.Fatalf("after trust: %+v", e)
+	}
+}
+
+func TestForgedSignatureIsNoise(t *testing.T) {
+	r := startRelay(t)
+	ctx := context.Background()
+	bob := newManager(t, "bob")
+	bw := watch(t, bob)
+	if _, err := bob.Join(ctx, r.room("lobby"), "pw"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Someone with the password signs with one key and claims another.
+	key, _ := crypt.DeriveKey("lobby", "pw", crypt.TestParams)
+	body, _ := json.Marshal(protocol.NewPayload(protocol.KindMessage, "alice", "forged"))
+	signer, claimed := identity.Generate(), identity.Generate()
+	pt, _ := json.Marshal(protocol.Envelope{Body: body, Key: claimed.Public(), Sig: signer.Sign(protocol.SigningInput(key.Route(), body))})
+	ct, _ := key.Seal(pt)
+
+	addr, _ := chat.ParseAddress(r.room("lobby"))
+	c, _, err := websocket.Dial(ctx, addr.WebSocketURL(key.Route()), &websocket.DialOptions{Subprotocols: []string{protocol.Subprotocol}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	frame, _ := json.Marshal(protocol.ClientFrame{Type: protocol.TypeSend, CT: ct})
+	if err := c.Write(ctx, websocket.MessageText, frame); err != nil {
+		t.Fatal(err)
+	}
+	e := bw.waitFor("forged message", func(e chat.Event) bool { return e.Kind == chat.KindMeerkat || e.Text == "forged" })
+	if e.Kind != chat.KindMeerkat {
+		t.Fatalf("forged signature accepted: %+v", e)
+	}
+}
+
+func TestLongestMessagesFit(t *testing.T) {
+	r := startRelay(t)
+	ctx := context.Background()
+	alice := newManager(t, "alice")
+	aw := watch(t, alice)
+	if _, err := alice.Join(ctx, r.room("lobby"), "pw"); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []string{"x", "<", `"`, "미"} {
+		text := strings.Repeat(c, protocol.MaxText/len(c))
+		if err := alice.Send(ctx, "", chat.KindMessage, text); err != nil {
+			t.Fatalf("%q x %d: %v", c, len(text), err)
+		}
+		aw.waitFor("echo", func(e chat.Event) bool { return e.Text == text })
+	}
 }

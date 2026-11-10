@@ -15,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jongwow/meerchat/internal/chat"
+	"github.com/jongwow/meerchat/internal/identity"
 	"github.com/jongwow/meerchat/internal/meerkat"
 	"github.com/jongwow/meerchat/internal/version"
 )
@@ -72,6 +73,10 @@ type Model struct {
 
 	mentionFor string
 	mentionRE  *regexp.Regexp
+
+	// warned holds room+nick+key combinations already called out, so a
+	// key change produces one explanation, not one per message.
+	warned map[string]bool
 }
 
 type roomState struct {
@@ -349,6 +354,19 @@ func (m *Model) handleEvent(e chat.Event) tea.Cmd {
 		}
 	}
 	r.events = append(r.events, e)
+	if e.Trust == identity.TrustChanged {
+		k := e.Room + "\x00" + e.Nick + "\x00" + e.Key
+		if !m.warned[k] {
+			if m.warned == nil {
+				m.warned = map[string]bool{}
+			}
+			m.warned[k] = true
+			nick := chat.Sanitize(e.Nick, false)
+			r.events = append(r.events, chat.Event{Room: e.Room, Kind: chat.KindSystem, Time: e.Time, Text: fmt.Sprintf(
+				"⚠ %s is speaking with a different key (%s) than before. a new device, or someone else using the name? check with them, then /trust %s",
+				nick, e.Key, nick)})
+		}
+	}
 	if over := len(r.events) - 2*backlog; over > 0 {
 		r.events = append(r.events[:0:0], r.events[over:]...)
 	}
@@ -541,13 +559,44 @@ func (m *Model) command(line string) tea.Cmd {
 			m.refresh(true)
 		}
 		return nil
+	case "whois":
+		if arg == "" {
+			return func() tea.Msg {
+				key, err := m.be.Identity(m.ctx)
+				if err != nil {
+					return noticeMsg{err.Error(), true}
+				}
+				return noticeMsg{fmt.Sprintf("you are %s · device key %s", m.nick, key), false}
+			}
+		}
+		if room == nil {
+			return m.setNotice("not in a room", true)
+		}
+		for i := len(room.events) - 1; i >= 0; i-- {
+			if e := room.events[i]; e.Nick == arg && e.Key != "" {
+				return m.setNotice(fmt.Sprintf("%s · key %s · %s", arg, e.Key, trustWords(e.Trust)), e.Trust == identity.TrustChanged)
+			}
+		}
+		return m.setNotice("haven't seen "+arg+" say anything in this room", true)
+	case "trust":
+		if room == nil || arg == "" {
+			return m.setNotice("usage: /trust nick (after a key-change warning)", true)
+		}
+		url := room.info.URL
+		return func() tea.Msg {
+			fp, err := m.be.Trust(m.ctx, url, arg)
+			if err != nil {
+				return noticeMsg{err.Error(), true}
+			}
+			return noticeMsg{fmt.Sprintf("now trusting %s's key %s", arg, fp), false}
+		}
 	case "fp", "fingerprint":
 		if room == nil {
 			return m.setNotice("not in a room", true)
 		}
 		return m.setNotice(fmt.Sprintf("key fingerprint for %s: %s — everyone with the right password sees the same one", room.info.URL, room.info.Fingerprint), false)
 	case "help", "?":
-		return m.setNotice("/join addr · /leave · /nick name · /me action · /fp · /clear · tab: next room · pgup/pgdn: scroll · ctrl+d: "+m.opts.DetachHint+m.quitHelp(), false)
+		return m.setNotice("/join addr · /leave · /nick name · /me action · /whois [nick] · /trust nick · /fp · /clear · tab: next room · pgup/pgdn: scroll · ctrl+d: "+m.opts.DetachHint+m.quitHelp(), false)
 	case "detach":
 		return tea.Quit
 	case "quit", "exit":
@@ -735,4 +784,16 @@ func (m *Model) footerView() string {
 		help = "↓ more below · " + help
 	}
 	return s.footer.Render(truncate(help, m.width))
+}
+
+func trustWords(t string) string {
+	switch t {
+	case identity.TrustSelf:
+		return "this is you"
+	case identity.TrustNew, identity.TrustKnown:
+		return "same key as when first seen here"
+	case identity.TrustChanged:
+		return "DIFFERENT key than when first seen here"
+	}
+	return t
 }

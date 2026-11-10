@@ -49,6 +49,10 @@ type Event struct {
 	History bool      `json:"history,omitempty"`
 	Peers   int       `json:"peers,omitempty"`
 	Status  string    `json:"status,omitempty"`
+	// Key is the sender's device key fingerprint and Trust how it compares
+	// with what this nickname used before: self, new, known or changed.
+	Key   string `json:"key,omitempty"`
+	Trust string `json:"trust,omitempty"`
 }
 
 // RoomInfo describes a joined room.

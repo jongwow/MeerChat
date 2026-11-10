@@ -30,8 +30,9 @@ GitHub repo, not the blog post. The README has the screenshot above the fold.
 >
 > What it does NOT do, so nobody has to dig: offline password guessing is
 > possible for anyone holding a ciphertext (use a passphrase), there is no
-> forward secrecy or sender authentication, and metadata is visible to the
-> relay. Details are in docs/THREAT_MODEL.md. It hasn't been audited, and I'd
+> forward secrecy, sender identity is trust-on-first-use (messages are signed
+> per device and a nickname that changes keys gets a ⚠), and metadata is
+> visible to the relay. Details are in docs/THREAT_MODEL.md. It hasn't been audited, and I'd
 > love protocol critique.
 >
 > Try it: `go install github.com/jongwow/meerchat/cmd/meer@latest`, then
@@ -50,6 +51,12 @@ together without an extra round trip, so the salt must be derivable from what
 both sides know. A random per-room salt would need a server-stored room record,
 which is exactly the state we avoid. Mitigation: unguessable room names for
 sensitive rooms. A PAKE is on the list.
+
+**"Anyone with the password can pretend to be me?"**
+Not silently. Every message is signed by a per-device Ed25519 key, and each
+client remembers which key a nickname used first in each room. A different key
+under a known name is shown with ⚠ until you `/trust` it. The gap is the
+usual TOFU one: an impostor who speaks first under a name nobody has seen yet.
 
 **"No forward secrecy?"**
 Correct, and it's documented. A single shared password can't give FS without

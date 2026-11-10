@@ -17,6 +17,7 @@ import (
 
 	"github.com/jongwow/meerchat/internal/client"
 	"github.com/jongwow/meerchat/internal/daemon"
+	"github.com/jongwow/meerchat/internal/identity"
 	"github.com/jongwow/meerchat/internal/ipc"
 	"github.com/jongwow/meerchat/internal/protocol"
 	"github.com/jongwow/meerchat/internal/version"
@@ -96,7 +97,12 @@ func daemonLogPath() string {
 	return filepath.Join(dir, "meer", "daemon.log")
 }
 
+// configPath returns where meer keeps a config file: $MEER_CONFIG_DIR, or
+// "meer" under the platform's config directory.
 func configPath(name string) string {
+	if d := os.Getenv("MEER_CONFIG_DIR"); d != "" {
+		return filepath.Join(d, name)
+	}
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return ""
@@ -147,10 +153,28 @@ scripts can attach and detach. It is started automatically by "meer" and
 "meer join". Run it in the foreground with "meer daemon".`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			log := g.logger()
+			opts := client.Options{Nick: defaultNick()}
+			// Without a usable config directory, run with a temporary
+			// identity rather than not at all; others will see a new key.
+			if p := configPath("identity"); p != "" {
+				if id, err := identity.LoadOrCreate(p); err != nil {
+					log.Warn("using a temporary identity", "err", err)
+				} else {
+					opts.Identity = id
+				}
+			}
+			if p := configPath("known_keys.json"); p != "" {
+				if book, err := identity.OpenBook(p); err != nil {
+					log.Warn("not remembering keys across restarts", "err", err)
+				} else {
+					opts.Book = book
+				}
+			}
 			return daemon.Run(cmd.Context(), daemon.Options{
 				Socket:  g.socketPath(),
-				Logger:  g.logger(),
-				Manager: client.Options{Nick: defaultNick()},
+				Logger:  log,
+				Manager: opts,
 				OnNick:  saveNick,
 			})
 		},

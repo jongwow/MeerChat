@@ -7,6 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jongwow/meerchat/internal/chat"
+	"github.com/jongwow/meerchat/internal/identity"
 )
 
 const (
@@ -43,8 +44,14 @@ func (m *Model) renderEvent(e chat.Event, w int) string {
 		if e.Self {
 			st = s.self
 		}
+		if e.Trust == identity.TrustChanged {
+			return body(gutter("⚠ "+nick, s.errorText.Bold(true)), text, st)
+		}
 		return body(gutter(nick, s.nick(nick)), text, st)
 	case chat.KindAction:
+		if e.Trust == identity.TrustChanged {
+			nick = "⚠ " + nick
+		}
 		return body(gutter("*", s.dim), nick+" "+text, s.action)
 	case chat.KindMeerkat:
 		return body(gutter("🐾 "+nick, s.meerkat), text, s.meerkat)

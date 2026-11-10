@@ -3,6 +3,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/jongwow/meerchat/internal/chat"
 	"github.com/jongwow/meerchat/internal/crypt"
+	"github.com/jongwow/meerchat/internal/identity"
 	"github.com/jongwow/meerchat/internal/meerkat"
 	"github.com/jongwow/meerchat/internal/protocol"
 )
@@ -49,6 +51,8 @@ type roomConn struct {
 	addr chat.Address
 	url  string
 	key  *crypt.Key
+	id   *identity.Identity
+	book *identity.Book
 	nick func() string
 	emit func(chat.Event)
 	log  *slog.Logger
@@ -70,11 +74,13 @@ type roomConn struct {
 	outbox    []pending
 }
 
-func newRoomConn(addr chat.Address, key *crypt.Key, nick func() string, emit func(chat.Event), log *slog.Logger) *roomConn {
+func newRoomConn(addr chat.Address, key *crypt.Key, id *identity.Identity, book *identity.Book, nick func() string, emit func(chat.Event), log *slog.Logger) *roomConn {
 	return &roomConn{
 		addr:      addr,
 		url:       addr.String(),
 		key:       key,
+		id:        id,
+		book:      book,
 		nick:      nick,
 		emit:      emit,
 		log:       log.With("room", addr.String()),
@@ -279,13 +285,20 @@ func (r *roomConn) handleMessage(f *protocol.ServerFrame, history bool) {
 		Self:    self,
 		History: history,
 	}
-	p, ok := r.open(f.CT)
+	p, pub, ok := r.open(f.CT)
 	if !ok {
 		ev.Kind = chat.KindMeerkat
 		ev.Nick = meerkat.Name(f.Peer)
 		ev.Text = meerkat.Speak(f.CT)
 		r.emit(ev)
 		return
+	}
+	// The device key is a better notion of "me" than the per-connection
+	// peer ID: it survives reconnects and covers messages replayed from
+	// before this session.
+	if bytes.Equal(pub, r.id.Public()) {
+		self = true
+		ev.Self = true
 	}
 	if self {
 		r.acked(p.ID)
@@ -294,6 +307,15 @@ func (r *roomConn) handleMessage(f *protocol.ServerFrame, history bool) {
 		return // replayed or duplicated
 	}
 	ev.Nick, ev.Text = p.Nick, p.Text
+	ev.Key = identity.Fingerprint(pub)
+	switch {
+	case self:
+		ev.Trust = identity.TrustSelf
+	case p.Kind == protocol.KindNick:
+		ev.Trust = r.book.Rename(r.url, p.Text, p.Nick, pub)
+	default:
+		ev.Trust = r.book.Observe(r.url, p.Nick, pub)
+	}
 	switch p.Kind {
 	case protocol.KindMessage:
 		ev.Kind = chat.KindMessage
@@ -309,18 +331,46 @@ func (r *roomConn) handleMessage(f *protocol.ServerFrame, history bool) {
 	r.emit(ev)
 }
 
-func (r *roomConn) open(ct []byte) (*protocol.Payload, bool) {
+// open decrypts a ciphertext, checks the sender's signature, and validates
+// the payload. Anything that fails, for any reason, is noise.
+func (r *roomConn) open(ct []byte) (*protocol.Payload, []byte, bool) {
 	pt, err := r.key.Open(ct)
 	if err != nil {
-		return nil, false
+		return nil, nil, false
+	}
+	var env protocol.Envelope
+	if err := json.Unmarshal(pt, &env); err != nil {
+		return nil, nil, false
+	}
+	if !identity.Verify(env.Key, protocol.SigningInput(r.key.Route(), env.Body), env.Sig) {
+		return nil, nil, false
 	}
 	var p protocol.Payload
-	if err := json.Unmarshal(pt, &p); err != nil || p.Validate() != nil {
-		// Authenticated but malformed: someone with the key is misbehaving.
-		// Treat it like noise rather than trusting any of it.
-		return nil, false
+	if err := json.Unmarshal(env.Body, &p); err != nil || p.Validate() != nil {
+		return nil, nil, false
 	}
-	return &p, true
+	return &p, env.Key, true
+}
+
+// seal signs a payload and encrypts it.
+func (r *roomConn) seal(p protocol.Payload) ([]byte, error) {
+	// No HTML escaping: it can blow "<<<" up sixfold for no benefit here.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(p); err != nil {
+		return nil, err
+	}
+	body := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+	pt, err := json.Marshal(protocol.Envelope{
+		Body: body,
+		Key:  r.id.Public(),
+		Sig:  r.id.Sign(protocol.SigningInput(r.key.Route(), body)),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return r.key.Seal(pt)
 }
 
 // say encrypts and sends a payload. Chat messages, actions and nick changes
@@ -331,11 +381,7 @@ func (r *roomConn) say(ctx context.Context, kind, text string) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	pt, err := json.Marshal(p)
-	if err != nil {
-		return err
-	}
-	ct, err := r.key.Seal(pt)
+	ct, err := r.seal(p)
 	if err != nil {
 		return err
 	}

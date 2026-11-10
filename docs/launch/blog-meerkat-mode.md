@@ -79,10 +79,12 @@ I'd rather say this up front than read it in the comments:
 - **Room names are guessable.** The server can't invert a route, but it can
   confirm that a route is `SHA-256(... "lobby")`. If the name matters, pick an
   unguessable one.
-- **No forward secrecy, no sender authentication.** One password, one key.
-  Anyone in the room can claim any nickname, and a leaked password unlocks
-  recorded history. A PAKE plus per-sender ratchets would fix this; it would
-  also make the thing ten times bigger.
+- **No forward secrecy.** One password, one key: a leaked password unlocks
+  recorded history. Per-sender ratchets would fix this, and would make the
+  thing several times bigger.
+- **Trust on first use.** Messages are signed per device, and a familiar
+  nickname showing up with a new key gets a ⚠. But whoever speaks first under
+  a name is the one remembered, just as with SSH host keys.
 
 The [threat model](../THREAT_MODEL.md) has the full list.
 

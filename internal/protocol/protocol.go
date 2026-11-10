@@ -183,3 +183,23 @@ func NewPeerID() string {
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
 }
+
+// Envelope is the plaintext inside every ciphertext: a payload signed by
+// the sender's device key. The room key proves membership; the signature
+// says which device spoke.
+type Envelope struct {
+	Body []byte `json:"b"`   // the JSON-encoded Payload
+	Key  []byte `json:"pk"`  // sender's Ed25519 public key
+	Sig  []byte `json:"sig"` // Ed25519 signature over SigningInput(route, Body)
+}
+
+// SigningInput is what a sender signs. Binding the route stops a signed
+// payload from being replayed into another room with the same password.
+func SigningInput(route string, body []byte) []byte {
+	const label = "meerchat/v1/signed-payload\x00"
+	out := make([]byte, 0, len(label)+len(route)+1+len(body))
+	out = append(out, label...)
+	out = append(out, route...)
+	out = append(out, 0)
+	return append(out, body...)
+}

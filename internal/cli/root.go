@@ -51,7 +51,7 @@ from your shell with "meer send" and "meer tail".`,
 	root.SetVersionTemplate("meer {{.Version}}\n")
 
 	root.AddCommand(
-		joinCmd(g), leaveCmd(g), sendCmd(g), tailCmd(g), roomsCmd(g), nickCmd(g),
+		joinCmd(g), leaveCmd(g), sendCmd(g), tailCmd(g), roomsCmd(g), nickCmd(g), whoamiCmd(g), trustCmd(g),
 		daemonCmd(g), serveCmd(g), sshCmd(g), versionCmd(),
 	)
 	if err := root.ExecuteContext(ctx); err != nil {

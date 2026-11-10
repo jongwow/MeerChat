@@ -46,7 +46,7 @@ func TestAutostart(t *testing.T) {
 	env := append(os.Environ(),
 		"MEER_SOCKET="+sock,
 		"MEER_PASSWORD=pw",
-		"XDG_CONFIG_HOME="+t.TempDir(),
+		"MEER_CONFIG_DIR="+t.TempDir(),
 		"XDG_CACHE_HOME="+t.TempDir(),
 	)
 	run := func(args ...string) string {

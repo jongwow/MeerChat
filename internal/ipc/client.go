@@ -138,6 +138,18 @@ func (c *Client) SetNick(ctx context.Context, nick string) error {
 	return c.Call(ctx, MethodSetNick, NickParams{Nick: nick}, nil)
 }
 
+func (c *Client) Identity(ctx context.Context) (string, error) {
+	var r KeyResult
+	err := c.Call(ctx, MethodIdentity, nil, &r)
+	return r.Key, err
+}
+
+func (c *Client) Trust(ctx context.Context, room, nick string) (string, error) {
+	var r KeyResult
+	err := c.Call(ctx, MethodTrust, TrustParams{Room: room, Nick: nick}, &r)
+	return r.Key, err
+}
+
 // Shutdown asks the daemon to leave all rooms and exit.
 func (c *Client) Shutdown(ctx context.Context) error {
 	return c.Call(ctx, MethodShutdown, nil, nil)

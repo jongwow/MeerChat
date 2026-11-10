@@ -22,7 +22,7 @@ the room.**
 | **Network observer** (TLS, `meers://`) | read traffic metadata | timing, approximate volume, IPs |
 | **Relay operator** | everything the relay sees, plus drop, delay, reorder, replay, and inject | see "What the relay learns" below |
 | **Wrong-password participant** | join any room whose name they know | the same as the relay sees for that room, plus meerkats |
-| **Right-password participant** | read and write | everything in the room, by design |
+| **Right-password participant** | read and write | everything in the room, by design. They cannot sign as another device, so impersonating someone you've already seen is flagged. |
 | **Another local user** on your machine | open sockets, list processes | nothing: the daemon socket is `0600` in a `0700` directory, and passwords never appear in argv |
 | **Someone who steals the relay's database** | read it | route IDs, sequence numbers, ephemeral peer IDs, timestamps, ciphertext |
 
@@ -56,9 +56,14 @@ Someone who learns the password later can decrypt anything they recorded or
 any history the relay still stores. Changing the password means moving to a
 new room key, which in practice means telling everyone a new password.
 
-**Impersonation inside the room.** The key proves you know the password, not
-who you are. Anyone in the room can send messages under any nickname.
-Nicknames are labels, not identities.
+**Impersonation before first contact.** Every message is signed by a
+per-device key, and clients remember the first key they saw for each
+nickname in each room. Someone who later borrows a nickname with a different
+key is flagged with ⚠ and cannot silently take it over. That is trust on
+first use, with its usual limit: if the impostor speaks *first* under a name,
+they are the one remembered. Compare `meer whoami` fingerprints out of band
+when it matters. Keys live unencrypted in your config directory, so anyone who
+can read your files can sign as you.
 
 **A malicious relay.** It cannot read or forge messages, but it can:
 
@@ -104,8 +109,8 @@ conversation.
 
 - Password-authenticated key exchange, so guessing requires talking to an
   online participant rather than holding a ciphertext.
-- Per-sender keys with signatures (or MLS), for sender authentication and
-  forward secrecy.
+- Ratcheting per-sender keys (or MLS), for forward secrecy. Signatures
+  already authenticate senders; ratchets would also protect past messages.
 - Hash-chained or signed sequence numbers, so clients can detect withholding
   and replays.
 - Encrypted, padded room names, so the route reveals nothing confirmable.

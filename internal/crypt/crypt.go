@@ -43,8 +43,9 @@ const (
 	// PadBlock is the block size plaintexts are padded to before sealing,
 	// so ciphertext length reveals message size only to this granularity.
 	PadBlock = 128
-	// MaxPlaintext is the largest plaintext Seal accepts.
-	MaxPlaintext = 8 * 1024
+	// MaxPlaintext is the largest plaintext Seal accepts. It leaves room for
+	// a maximum-length message after JSON escaping, base64 and a signature.
+	MaxPlaintext = 12 * 1024
 	// MaxRoomName is the maximum room name length in bytes.
 	MaxRoomName = 64
 

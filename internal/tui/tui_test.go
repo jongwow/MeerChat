@@ -15,12 +15,13 @@ import (
 )
 
 type fakeBackend struct {
-	mu     sync.Mutex
-	rooms  []chat.RoomInfo
-	sent   []string
-	joined []string
-	nick   string
-	ch     chan chat.Event
+	mu      sync.Mutex
+	rooms   []chat.RoomInfo
+	sent    []string
+	joined  []string
+	trusted []string
+	nick    string
+	ch      chan chat.Event
 }
 
 func newFake() *fakeBackend {
@@ -60,6 +61,13 @@ func (f *fakeBackend) SetNick(_ context.Context, n string) error {
 	return nil
 }
 func (f *fakeBackend) Subscribe(context.Context, int) (<-chan chat.Event, error) { return f.ch, nil }
+func (f *fakeBackend) Identity(context.Context) (string, error)                  { return "aaaa-bbbb-cccc-dddd", nil }
+func (f *fakeBackend) Trust(_ context.Context, _, nick string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.trusted = append(f.trusted, nick)
+	return "eeee-ffff-0000-1111", nil
+}
 
 // drive feeds a message through Update and runs resulting commands
 // synchronously, a few levels deep, ignoring ones that block.
@@ -261,5 +269,40 @@ func TestReconnectNotices(t *testing.T) {
 	s := screen(m)
 	if strings.Count(s, "connection lost") != 1 || !strings.Contains(s, "reconnected") {
 		t.Fatalf("got:\n%s", s)
+	}
+}
+
+func TestKeyChangeWarning(t *testing.T) {
+	m, be := setup(t)
+	info, _ := be.Join(context.Background(), "meer://h/lobby", "pw")
+	drive(m, roomsMsg([]chat.RoomInfo{info}))
+	ev := func(text, key, trust string) {
+		drive(m, eventMsg(chat.Event{Room: info.URL, Kind: chat.KindMessage, Nick: "alice", Text: text, Key: key, Trust: trust, Time: time.Now()}))
+	}
+	ev("hi", "1111-1111-1111-1111", "new")
+	ev("it's me", "9999-9999-9999-9999", "changed")
+	ev("really", "9999-9999-9999-9999", "changed")
+	s := screen(m)
+	if !strings.Contains(s, "⚠ alice") {
+		t.Fatalf("no warning marker:\n%s", s)
+	}
+	if n := strings.Count(s, "speaking with a different"); n != 1 {
+		t.Fatalf("explanation shown %d times:\n%s", n, s)
+	}
+
+	typeText(m, "/whois alice")
+	press(m, tea.KeyEnter)
+	if !strings.Contains(screen(m), "DIFFERENT key") {
+		t.Fatalf("whois:\n%s", screen(m))
+	}
+	typeText(m, "/trust alice")
+	press(m, tea.KeyEnter)
+	if len(be.trusted) != 1 || be.trusted[0] != "alice" || !strings.Contains(screen(m), "now trusting alice") {
+		t.Fatalf("trust: %v\n%s", be.trusted, screen(m))
+	}
+	typeText(m, "/whois")
+	press(m, tea.KeyEnter)
+	if !strings.Contains(screen(m), "aaaa-bbbb-cccc-dddd") {
+		t.Fatalf("own identity:\n%s", screen(m))
 	}
 }
