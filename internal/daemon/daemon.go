@@ -170,6 +170,9 @@ func (d *daemon) call(ctx context.Context, req ipc.Request) (any, error) {
 		if err := decode(&p); err != nil {
 			return nil, err
 		}
+		if p.WaitMS > 0 {
+			return nil, d.m.SendAndWait(ctx, p.Room, p.Kind, p.Text, time.Duration(p.WaitMS)*time.Millisecond)
+		}
 		return nil, d.m.Send(ctx, p.Room, p.Kind, p.Text)
 	case ipc.MethodRooms:
 		return d.m.Rooms(), nil

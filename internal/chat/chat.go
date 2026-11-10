@@ -53,6 +53,12 @@ type Event struct {
 	// with what this nickname used before: self, new, known or changed.
 	Key   string `json:"key,omitempty"`
 	Trust string `json:"trust,omitempty"`
+	// ID is the payload ID. Your own messages first appear with Pending set,
+	// then again with the same ID once the relay has echoed them, or with
+	// Failed set if they could not be delivered in time.
+	ID      string `json:"id,omitempty"`
+	Pending bool   `json:"pending,omitempty"`
+	Failed  bool   `json:"failed,omitempty"`
 }
 
 // RoomInfo describes a joined room.

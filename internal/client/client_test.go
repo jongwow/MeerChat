@@ -457,3 +457,60 @@ func TestLongestMessagesFit(t *testing.T) {
 		aw.waitFor("echo", func(e chat.Event) bool { return e.Text == text })
 	}
 }
+
+func TestPendingThenConfirmed(t *testing.T) {
+	r := startRelay(t)
+	ctx := context.Background()
+	alice := newManager(t, "alice")
+	aw := watch(t, alice)
+	if _, err := alice.Join(ctx, r.room("lobby"), "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if err := alice.SendAndWait(ctx, "", chat.KindMessage, "hello", 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	p := aw.waitFor("pending", func(e chat.Event) bool { return e.Text == "hello" })
+	if !p.Pending || !p.Self || p.ID == "" {
+		t.Fatalf("first copy should be pending: %+v", p)
+	}
+	c := aw.waitFor("confirmed", func(e chat.Event) bool { return e.Text == "hello" })
+	if c.Pending || c.ID != p.ID || c.Seq == 0 {
+		t.Fatalf("second copy should be the confirmed one: %+v", c)
+	}
+	// A late subscriber sees only the confirmed copy.
+	ch, cancel := alice.Subscribe(100)
+	defer cancel()
+	n := 0
+	for e := range ch {
+		if e.Kind == chat.KindSync {
+			break
+		}
+		if e.Text == "hello" {
+			n++
+			if e.Pending {
+				t.Fatal("pending copy left in scrollback")
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("scrollback has %d copies", n)
+	}
+}
+
+func TestSendAndWaitWhileRelayDown(t *testing.T) {
+	r := startRelay(t)
+	ctx := context.Background()
+	alice, bob := newManager(t, "alice"), newManager(t, "bob")
+	aw, bw := watch(t, alice), watch(t, bob)
+	_, _ = alice.Join(ctx, r.room("lobby"), "pw")
+	_, _ = bob.Join(ctx, r.room("lobby"), "pw")
+	addr := r.addr
+	r.stop()
+	aw.waitFor("offline", func(e chat.Event) bool { return e.Kind == chat.KindStatus && e.Status == chat.StatusOffline })
+	err := alice.SendAndWait(ctx, "", chat.KindMessage, "eventually", 200*time.Millisecond)
+	if !errors.Is(err, ErrNotConfirmed) {
+		t.Fatalf("got %v", err)
+	}
+	r.start(addr)
+	bw.waitFor("delivered after all", func(e chat.Event) bool { return e.Text == "eventually" && !e.Pending })
+}

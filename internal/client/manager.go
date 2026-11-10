@@ -115,7 +115,7 @@ func (m *Manager) Close() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	for _, j := range rooms {
-		_ = j.conn.say(ctx, protocol.KindLeave, "")
+		_, _ = j.conn.say(ctx, protocol.KindLeave, "")
 	}
 	m.cancel()
 	for _, j := range rooms {
@@ -150,7 +150,7 @@ func (m *Manager) SetNick(ctx context.Context, nick string) error {
 		return nil
 	}
 	for _, c := range conns {
-		_ = c.say(ctx, protocol.KindNick, old) // best effort; offline rooms miss it
+		_, _ = c.say(ctx, protocol.KindNick, old) // queued for rooms that are offline
 	}
 	return nil
 }
@@ -271,34 +271,63 @@ func (m *Manager) Leave(ctx context.Context, room string) error {
 		return ErrNoRoom
 	}
 	sctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	_ = j.conn.say(sctx, protocol.KindLeave, "")
+	_, _ = j.conn.say(sctx, protocol.KindLeave, "")
 	cancel()
 	m.remove(url)
 	m.emit(chat.Event{Room: url, Kind: chat.KindSystem, Time: time.Now(), Text: "left " + url})
 	return nil
 }
 
-// Send posts a message (kind "message") or an action (kind "action").
+// ErrNotConfirmed means a message is queued but the relay has not echoed it
+// within the wait time. It stays queued and is retried on reconnect.
+var ErrNotConfirmed = errors.New("not confirmed by the relay yet; still queued and will be retried while the daemon runs")
+
+// Send posts a message (kind "message") or an action (kind "action") and
+// returns once it is queued.
 func (m *Manager) Send(ctx context.Context, room, kind, text string) error {
+	_, err := m.send(ctx, room, kind, text)
+	return err
+}
+
+// SendAndWait is Send, then waits up to wait for the relay to echo the
+// message back, which means it was stored and fanned out.
+func (m *Manager) SendAndWait(ctx context.Context, room, kind, text string, wait time.Duration) error {
+	done, err := m.send(ctx, room, kind, text)
+	if err != nil || wait <= 0 {
+		return err
+	}
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-t.C:
+		return ErrNotConfirmed
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (m *Manager) send(ctx context.Context, room, kind, text string) (<-chan struct{}, error) {
 	url, err := m.Resolve(room)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	pk := protocol.KindMessage
 	if kind == chat.KindAction {
 		pk = protocol.KindAction
 	}
 	if strings.TrimSpace(text) == "" {
-		return errors.New("empty message")
+		return nil, errors.New("empty message")
 	}
 	if len(text) > protocol.MaxText {
-		return fmt.Errorf("message longer than %d bytes", protocol.MaxText)
+		return nil, fmt.Errorf("message longer than %d bytes", protocol.MaxText)
 	}
 	m.mu.Lock()
 	j, ok := m.rooms[url]
 	m.mu.Unlock()
 	if !ok {
-		return ErrNoRoom
+		return nil, ErrNoRoom
 	}
 	return j.conn.say(ctx, pk, text)
 }
@@ -401,6 +430,15 @@ func (m *Manager) emit(e chat.Event) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if j, ok := m.rooms[e.Room]; ok && e.Kind != chat.KindPeers {
+		if e.ID != "" && !e.Pending {
+			// The confirmed (or failed) copy replaces the pending one.
+			for i := range j.scroll {
+				if j.scroll[i].ID == e.ID && j.scroll[i].Pending {
+					j.scroll = append(j.scroll[:i], j.scroll[i+1:]...)
+					break
+				}
+			}
+		}
 		j.scroll = append(j.scroll, e)
 		if over := len(j.scroll) - m.opts.Scrollback; over > 0 {
 			j.scroll = append(j.scroll[:0:0], j.scroll[over:]...)

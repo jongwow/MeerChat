@@ -353,6 +353,13 @@ func (m *Model) handleEvent(e chat.Event) tea.Cmd {
 			return nil
 		}
 	}
+	if e.ID != "" && !e.Pending && replacePending(r, e) {
+		// Our own message, confirmed (or failed) in place.
+		if r == m.focused() {
+			m.refresh(false)
+		}
+		return nil
+	}
 	r.events = append(r.events, e)
 	if e.Trust == identity.TrustChanged {
 		k := e.Room + "\x00" + e.Nick + "\x00" + e.Key
@@ -796,4 +803,16 @@ func trustWords(t string) string {
 		return "DIFFERENT key than when first seen here"
 	}
 	return t
+}
+
+// replacePending swaps the pending copy of e (same payload ID) for e. It
+// keeps the message where it was typed rather than moving it.
+func replacePending(r *roomState, e chat.Event) bool {
+	for i := len(r.events) - 1; i >= 0; i-- {
+		if r.events[i].ID == e.ID && r.events[i].Pending {
+			r.events[i] = e
+			return true
+		}
+	}
+	return false
 }

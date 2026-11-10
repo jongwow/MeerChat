@@ -104,8 +104,9 @@ Every frame has `t`. Other fields depend on it:
 3. Every accepted `send` is stamped, stored, and fanned out to **every**
    connection in the room, including the sender. The echo is the sender's
    delivery acknowledgement.
-4. A connection whose outbound queue overflows is closed with 1008 "too
-   slow" rather than allowed to stall the room.
+4. A connection whose outbound queue overflows is dropped (no close
+   handshake: it isn't reading) rather than allowed to stall the room. It
+   can reconnect with `since` and catch up.
 5. Messages beyond the rate limit (reference: 5/s sustained, burst 20) are
    answered with `error rate_limited` and dropped.
 6. When shutting down, the relay closes connections with 1001 (going away).

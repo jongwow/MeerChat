@@ -67,6 +67,8 @@ type (
 		Room string `json:"room"`
 		Kind string `json:"kind"`
 		Text string `json:"text"`
+		// WaitMS, if positive, waits for the relay to echo the message.
+		WaitMS int64 `json:"wait_ms,omitempty"`
 	}
 	NickParams struct {
 		Nick string `json:"nick"`

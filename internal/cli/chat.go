@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
@@ -125,9 +126,16 @@ func leaveCmd(g *globals) *cobra.Command {
 func sendCmd(g *globals) *cobra.Command {
 	var room string
 	var action bool
+	var wait time.Duration
 	cmd := &cobra.Command{
 		Use:   "send [TEXT...]",
 		Short: "Send a message; with no TEXT, send each line of stdin",
+		Long: `Send a message to a room. With no TEXT (or "-"), send each line of stdin.
+
+By default meer send waits until the relay has echoed each message back, so
+its exit status tells a script whether the message really went out. If the
+relay is unreachable the message stays queued in the daemon, is retried on
+reconnect, and meer send exits non-zero after --wait.`,
 		Example: `  meer send "deploy finished"
   meer send -r ops --me "is rolling back"
   tail -f /var/log/app.log | grep ERROR | meer send -r alerts`,
@@ -143,7 +151,7 @@ func sendCmd(g *globals) *cobra.Command {
 			}
 			if len(args) > 0 && (len(args) != 1 || args[0] != "-") {
 				for _, part := range chunk(strings.Join(args, " "), protocol.MaxText) {
-					if err := c.Send(cmd.Context(), room, kind, part); err != nil {
+					if err := c.SendAndWait(cmd.Context(), room, kind, part, wait); err != nil {
 						return err
 					}
 				}
@@ -162,7 +170,7 @@ func sendCmd(g *globals) *cobra.Command {
 					if err := lim.Wait(cmd.Context()); err != nil {
 						return err
 					}
-					if err := c.Send(cmd.Context(), room, kind, part); err != nil {
+					if err := c.SendAndWait(cmd.Context(), room, kind, part, wait); err != nil {
 						return err
 					}
 				}
@@ -172,6 +180,7 @@ func sendCmd(g *globals) *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&room, "room", "r", "", "room name or address (default: most recently joined)")
 	cmd.Flags().BoolVar(&action, "me", false, "send as an action, like /me")
+	cmd.Flags().DurationVar(&wait, "wait", 10*time.Second, "how long to wait for the relay to confirm each message (0: don't wait)")
 	return cmd
 }
 
@@ -234,8 +243,8 @@ func tailCmd(g *globals) *cobra.Command {
 				if filter != "" && e.Room != filter {
 					continue
 				}
-				if !all && !tailable(e) {
-					continue
+				if e.Pending || (!all && !tailable(e)) {
+					continue // scripts only see messages the relay confirmed
 				}
 				if asJSON {
 					if err := enc.Encode(e); err != nil {

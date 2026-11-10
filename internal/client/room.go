@@ -42,8 +42,11 @@ const (
 
 type pending struct {
 	id    string
+	kind  string // chat event kind, for the failure notice
+	text  string
 	frame []byte
 	at    time.Time
+	done  chan struct{} // closed when the relay echoes it
 }
 
 // roomConn owns the connection to one room and survives reconnects.
@@ -194,7 +197,7 @@ func (r *roomConn) session(ctx context.Context, first bool) (err error) {
 	r.setStatus(chat.StatusOnline, "")
 	r.emit(chat.Event{Room: r.url, Kind: chat.KindPeers, Time: time.Now(), Peers: welcome.Peers})
 	if announce {
-		if err := r.say(ctx, protocol.KindJoin, ""); err != nil {
+		if _, err := r.say(ctx, protocol.KindJoin, ""); err != nil {
 			return err
 		}
 	}
@@ -306,7 +309,7 @@ func (r *roomConn) handleMessage(f *protocol.ServerFrame, history bool) {
 	if !r.seen.add(p.ID) {
 		return // replayed or duplicated
 	}
-	ev.Nick, ev.Text = p.Nick, p.Text
+	ev.Nick, ev.Text, ev.ID = p.Nick, p.Text, p.ID
 	ev.Key = identity.Fingerprint(pub)
 	switch {
 	case self:
@@ -376,44 +379,58 @@ func (r *roomConn) seal(p protocol.Payload) ([]byte, error) {
 // say encrypts and sends a payload. Chat messages, actions and nick changes
 // go through the outbox and survive disconnects; join and leave
 // announcements are only meaningful right now, so they do not.
-func (r *roomConn) say(ctx context.Context, kind, text string) error {
+//
+// For durable payloads it returns a channel that is closed once the relay
+// has echoed the message back; chat messages and actions also appear
+// immediately as pending events.
+func (r *roomConn) say(ctx context.Context, kind, text string) (<-chan struct{}, error) {
 	p := protocol.NewPayload(kind, r.nick(), text)
 	if err := p.Validate(); err != nil {
-		return err
+		return nil, err
 	}
 	ct, err := r.seal(p)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	b, err := json.Marshal(protocol.ClientFrame{Type: protocol.TypeSend, CT: ct})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	durable := kind != protocol.KindJoin && kind != protocol.KindLeave
+	evKind := map[string]string{protocol.KindMessage: chat.KindMessage, protocol.KindAction: chat.KindAction}[kind]
 
+	var done chan struct{}
 	r.mu.Lock()
 	c := r.conn
 	if durable {
 		if len(r.outbox) >= maxOutbox {
 			r.mu.Unlock()
-			return ErrOffline
+			return nil, ErrOffline
 		}
-		r.outbox = append(r.outbox, pending{id: p.ID, frame: b, at: time.Now()})
+		done = make(chan struct{})
+		r.outbox = append(r.outbox, pending{id: p.ID, kind: evKind, text: text, frame: b, at: time.Now(), done: done})
 	}
 	r.mu.Unlock()
 
+	if evKind != "" {
+		r.emit(chat.Event{
+			Room: r.url, Kind: evKind, Time: time.Now(), Nick: p.Nick, Text: text, Self: true,
+			Key: r.id.Fingerprint(), Trust: identity.TrustSelf, ID: p.ID, Pending: true,
+		})
+	}
+
 	if c == nil {
 		if durable {
-			return nil // queued; sent on reconnect
+			return done, nil // queued; sent on reconnect
 		}
-		return ErrOffline
+		return nil, ErrOffline
 	}
 	wctx, cancel := context.WithTimeout(ctx, writeTimeout)
 	defer cancel()
 	if err := c.Write(wctx, websocket.MessageText, b); err != nil && !durable {
-		return err
+		return nil, err
 	}
-	return nil
+	return done, nil
 }
 
 // acked removes a message from the outbox once the relay has echoed it.
@@ -423,6 +440,7 @@ func (r *roomConn) acked(id string) {
 	for i, p := range r.outbox {
 		if p.id == id {
 			r.outbox = append(r.outbox[:i], r.outbox[i+1:]...)
+			close(p.done)
 			return
 		}
 	}
@@ -432,9 +450,12 @@ func (r *roomConn) acked(id string) {
 func (r *roomConn) flushOutbox(ctx context.Context, c *websocket.Conn) error {
 	r.mu.Lock()
 	keep := r.outbox[:0]
+	var expired []pending
 	for _, p := range r.outbox {
 		if time.Since(p.at) < outboxTTL {
 			keep = append(keep, p)
+		} else {
+			expired = append(expired, p)
 		}
 	}
 	r.outbox = keep
@@ -443,6 +464,12 @@ func (r *roomConn) flushOutbox(ctx context.Context, c *websocket.Conn) error {
 		frames[i] = p.frame
 	}
 	r.mu.Unlock()
+	for _, p := range expired {
+		if p.kind != "" {
+			r.emit(chat.Event{Room: r.url, Kind: p.kind, Time: time.Now(), Nick: r.nick(), Text: p.text,
+				Self: true, Trust: identity.TrustSelf, ID: p.id, Failed: true})
+		}
+	}
 	for _, b := range frames {
 		wctx, cancel := context.WithTimeout(ctx, writeTimeout)
 		err := c.Write(wctx, websocket.MessageText, b)

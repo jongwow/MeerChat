@@ -306,3 +306,28 @@ func TestKeyChangeWarning(t *testing.T) {
 		t.Fatalf("own identity:\n%s", screen(m))
 	}
 }
+
+func TestPendingMessageIsConfirmedInPlace(t *testing.T) {
+	m, be := setup(t)
+	info, _ := be.Join(context.Background(), "meer://h/lobby", "pw")
+	drive(m, roomsMsg([]chat.RoomInfo{info}))
+	now := time.Now()
+	drive(m, eventMsg(chat.Event{Room: info.URL, Kind: chat.KindMessage, Nick: "alice", Text: "mine", Self: true, ID: "abc", Pending: true, Time: now}))
+	drive(m, eventMsg(chat.Event{Room: info.URL, Kind: chat.KindMessage, Nick: "bob", Text: "theirs", Time: now}))
+	if !strings.Contains(screen(m), "  …   ") {
+		t.Fatalf("no pending marker:\n%s", screen(m))
+	}
+	drive(m, eventMsg(chat.Event{Room: info.URL, Kind: chat.KindMessage, Nick: "alice", Text: "mine", Self: true, ID: "abc", Seq: 7, Time: now}))
+	s := screen(m)
+	if strings.Contains(s, "…") || strings.Count(s, "mine") != 1 {
+		t.Fatalf("pending not replaced:\n%s", s)
+	}
+	if strings.Index(s, "mine") > strings.Index(s, "theirs") {
+		t.Fatalf("confirmed message moved:\n%s", s)
+	}
+	drive(m, eventMsg(chat.Event{Room: info.URL, Kind: chat.KindMessage, Nick: "alice", Text: "lost", Self: true, ID: "def", Pending: true, Time: now}))
+	drive(m, eventMsg(chat.Event{Room: info.URL, Kind: chat.KindMessage, Nick: "alice", Text: "lost", Self: true, ID: "def", Failed: true, Time: now}))
+	if !strings.Contains(screen(m), "✗") || !strings.Contains(screen(m), "lost (not delivered)") {
+		t.Fatalf("failure not shown:\n%s", screen(m))
+	}
+}

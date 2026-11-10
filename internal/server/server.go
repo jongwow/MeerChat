@@ -114,9 +114,10 @@ type peer struct {
 	id   string
 	out  chan []byte
 	once sync.Once
-	// close ends the connection with a status code. It is a field so the
-	// fan-out logic can be tested without real sockets.
+	// close ends the connection with a close handshake; drop cuts it at
+	// once. They are fields so fan-out can be tested without sockets.
 	close func(websocket.StatusCode, string)
+	drop  func()
 }
 
 // kick closes the peer's connection with a status code. It does not block:
@@ -124,6 +125,14 @@ type peer struct {
 func (p *peer) kick(code websocket.StatusCode, reason string) {
 	p.once.Do(func() {
 		go p.close(code, reason)
+	})
+}
+
+// cut drops a peer that can't keep up. A peer that isn't reading would
+// never complete a close handshake, so don't wait for one.
+func (p *peer) cut() {
+	p.once.Do(func() {
+		go p.drop()
 	})
 }
 
@@ -271,6 +280,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		id:    protocol.NewPeerID(),
 		out:   make(chan []byte, s.cfg.SendBuffer),
 		close: func(code websocket.StatusCode, reason string) { _ = c.Close(code, reason) },
+		drop:  func() { _ = c.CloseNow() },
 	}
 
 	rm, err := s.join(ctx, route, p, since)
@@ -454,7 +464,7 @@ func (s *Server) fanout(rm *room, skip *peer, b []byte) {
 		select {
 		case p.out <- b:
 		default:
-			p.kick(websocket.StatusPolicyViolation, "too slow")
+			p.cut()
 		}
 	}
 }
@@ -463,7 +473,7 @@ func (s *Server) sendError(p *peer, code, msg string) {
 	select {
 	case p.out <- encode(protocol.ServerFrame{Type: protocol.TypeError, Code: code, Message: msg}):
 	default:
-		p.kick(websocket.StatusPolicyViolation, "too slow")
+		p.cut()
 	}
 }
 

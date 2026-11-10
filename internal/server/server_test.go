@@ -226,9 +226,10 @@ func TestRateLimit(t *testing.T) {
 func TestFanoutKicksFullQueues(t *testing.T) {
 	kicked := make(chan string, 2)
 	mk := func(id string, buf int) *peer {
-		return &peer{id: id, out: make(chan []byte, buf), close: func(_ websocket.StatusCode, reason string) {
-			kicked <- id + ": " + reason
-		}}
+		return &peer{id: id, out: make(chan []byte, buf),
+			close: func(websocket.StatusCode, string) { kicked <- id + ": closed" },
+			drop:  func() { kicked <- id + ": dropped" },
+		}
 	}
 	fast, slow := mk("fast", 10), mk("slow", 1)
 	s := New(Config{})
@@ -241,7 +242,7 @@ func TestFanoutKicksFullQueues(t *testing.T) {
 	rm.mu.Unlock()
 	select {
 	case k := <-kicked:
-		if k != "slow: too slow" {
+		if k != "slow: dropped" {
 			t.Fatalf("kicked %q", k)
 		}
 	case <-time.After(time.Second):

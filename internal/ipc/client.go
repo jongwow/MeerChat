@@ -122,6 +122,11 @@ func (c *Client) Send(ctx context.Context, room, kind, text string) error {
 	return c.Call(ctx, MethodSend, SendParams{Room: room, Kind: kind, Text: text}, nil)
 }
 
+// SendAndWait sends and waits up to wait for the relay to confirm.
+func (c *Client) SendAndWait(ctx context.Context, room, kind, text string, wait time.Duration) error {
+	return c.Call(ctx, MethodSend, SendParams{Room: room, Kind: kind, Text: text, WaitMS: wait.Milliseconds()}, nil)
+}
+
 func (c *Client) Rooms(ctx context.Context) ([]chat.RoomInfo, error) {
 	var r []chat.RoomInfo
 	err := c.Call(ctx, MethodRooms, nil, &r)

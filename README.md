@@ -25,7 +25,7 @@ If you join with the wrong password, nothing stops you. You just can't decrypt a
 - **The relay is dumb on purpose.** It can't read messages, doesn't know room names, and has no notion of membership. You can run one on a $4 VPS and not worry about what's on it.
 - **One static binary.** Relay, client, background daemon, TUI and SSH demo are all `meer`. No CGO and no runtime dependencies.
 - **Shell-native.** Rooms live in a background daemon, like tmux sessions. Detach, reattach, and script it: `make && meer send "build passed"`, `meer tail --json | jq`.
-- **Robust where it matters.** Reconnects with jittered backoff and resumes from the last sequence number. An outbox gives at-least-once delivery on the wire and exactly-once on screen. A relay restart without a database doesn't lose messages that are still in flight.
+- **Robust where it matters.** Messages show as `…` until the relay confirms them. Reconnects with jittered backoff and resumes from the last sequence number. An outbox gives at-least-once delivery on the wire and exactly-once on screen. A relay restart without a database doesn't lose messages that are still in flight.
 - **Impersonation is visible.** Every message is signed by a per-device Ed25519 key. If someone shows up under a familiar nickname with a different key, you get a ⚠ instead of a convincing fake.
 - **Boring crypto.** Argon2id, HKDF-SHA256, XChaCha20-Poly1305 and Ed25519, with padding to 128-byte buckets. There is no homemade cipher. Read [the protocol](docs/PROTOCOL.md) and [the threat model](docs/THREAT_MODEL.md), including what meer does *not* protect against.
 
@@ -77,7 +77,7 @@ Everyone who typed the same password sees the same **key fingerprint** (e.g. `4F
 |---|---|
 | `meer` | Chat UI. Starts the daemon if needed. `ctrl+d` detaches, and rooms stay connected. |
 | `meer join ADDRESS` | Join `meer://host[:port]/room` (or `meers://` for TLS). The password comes from the TTY, `--password-stdin`, or `$MEER_PASSWORD`, never argv. |
-| `meer send [-r ROOM] [--me] TEXT…` | Send a message. With no text, it sends each line of stdin, rate-limited to stay under the relay's limits. |
+| `meer send [-r ROOM] [--me] TEXT…` | Send a message and wait until the relay confirms it, so the exit status means something. With no text, it sends each line of stdin, rate-limited to stay under the relay's limits. |
 | `meer tail [-r ROOM] [-n N] [--json] [--no-follow]` | Print recent messages and follow. |
 | `meer whoami` · `meer trust NICK` | Show your device key; accept someone's new key after a ⚠ warning. |
 | `meer rooms [--json]` · `meer nick [NAME]` · `meer leave [ROOM]` | Housekeeping. |

@@ -20,6 +20,13 @@ const (
 func (m *Model) renderEvent(e chat.Event, w int) string {
 	s := m.st
 	ts := s.time.Render(e.Time.Local().Format("15:04"))
+	switch {
+	case e.Pending:
+		ts = s.time.Render("  …  ") // sent, not yet confirmed by the relay
+	case e.Failed:
+		ts = s.errorText.Render("  ✗  ")
+		e.Text += " (not delivered)"
+	}
 	nick := chat.Sanitize(e.Nick, false)
 	text := chat.Sanitize(e.Text, true)
 
